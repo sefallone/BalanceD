@@ -20,12 +20,21 @@ def cargar_datos():
     if os.path.exists(DATA_FILE):
         with open(DATA_FILE, 'r', encoding='utf-8') as f:
             datos = json.load(f)
-            # Asegurar que todos los gastos tengan el campo 'pagado'
-            for gasto in datos.get('gastos', []):
+            
+            # Asegurar que todos los gastos tengan el campo 'pagado' y 'id'
+            for i, gasto in enumerate(datos.get('gastos', [])):
                 if 'pagado' not in gasto:
                     gasto['pagado'] = True  # Por defecto, gastos antiguos se consideran pagados
                 if 'fecha_pago' not in gasto and gasto['pagado']:
                     gasto['fecha_pago'] = gasto['fecha']  # Usar la fecha del gasto como fecha de pago
+                if 'id' not in gasto:
+                    gasto['id'] = i + 1  # Asignar ID automáticamente
+            
+            # Asegurar que todas las ventas tengan 'id'
+            for i, venta in enumerate(datos.get('ventas', [])):
+                if 'id' not in venta:
+                    venta['id'] = i + 1
+            
             return datos
     return {
         "ventas": [],
@@ -390,8 +399,14 @@ def ver_balance():
                 gastos_clasif = df_gastos_clasif[df_gastos_clasif['clasificacion'] == clasificacion]
                 total_bs = gastos_clasif['monto_bs'].sum()
                 total_usd = gastos_clasif['monto_usd'].sum()
-                pagados = gastos_clasif['pagado'].sum() if 'pagado' in gastos_clasif.columns else len(gastos_clasif)
-                pendientes = len(gastos_clasif) - pagados
+                
+                # Contar gastos pagados y pendientes
+                if 'pagado' in gastos_clasif.columns:
+                    pagados = gastos_clasif['pagado'].sum()
+                    pendientes = len(gastos_clasif) - pagados
+                else:
+                    pagados = len(gastos_clasif)
+                    pendientes = 0
                 
                 resumen_data.append({
                     'clasificacion': clasificacion,
@@ -458,7 +473,10 @@ def gestion_pagos():
     
     st.subheader("Gastos Pendientes de Pago")
     
-    for gasto in gastos_pendientes:
+    for i, gasto in enumerate(gastos_pendientes):
+        # Usar índice como fallback si no hay ID
+        gasto_id = gasto.get('id', i + 1)
+        
         with st.expander(f"📅 {gasto['fecha']} - {gasto['clasificacion']} - Bs. {gasto['monto_bs']:,.2f}"):
             col1, col2 = st.columns([3, 1])
             
@@ -466,14 +484,19 @@ def gestion_pagos():
                 st.write(f"**Descripción:** {gasto['descripcion']}")
                 st.write(f"**Monto:** Bs. {gasto['monto_bs']:,.2f} (${gasto['monto_usd']:,.2f})")
                 st.write(f"**Clasificación:** {gasto['clasificacion']}")
+                st.write(f"**ID:** {gasto_id}")
             
             with col2:
-                if st.button("✅ Marcar como Pagado", key=f"pagar_{gasto['id']}"):
+                if st.button("✅ Marcar como Pagado", key=f"pagar_{gasto_id}"):
                     # Actualizar el gasto como pagado
                     for g in st.session_state.datos['gastos']:
-                        if g['id'] == gasto['id']:
+                        g_id = g.get('id', 'unknown')
+                        if g_id == gasto_id:
                             g['pagado'] = True
                             g['fecha_pago'] = date.today().isoformat()
+                            # Asegurar que tenga ID si no lo tenía
+                            if 'id' not in g:
+                                g['id'] = gasto_id
                             break
                     
                     guardar_datos(st.session_state.datos)
