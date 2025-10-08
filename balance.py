@@ -24,7 +24,7 @@ def cargar_datos():
             # Asegurar que todos los gastos tengan el campo 'pagado' y 'id'
             for i, gasto in enumerate(datos.get('gastos', [])):
                 if 'pagado' not in gasto:
-                    gasto['pagado'] = True  # Por defecto, gastos antiguos se consideran pagados
+                    gasto['pagado'] = False  # Por defecto, gastos antiguos se consideran NO pagados
                 if 'fecha_pago' not in gasto and gasto['pagado']:
                     gasto['fecha_pago'] = gasto['fecha']  # Usar la fecha del gasto como fecha de pago
                 if 'id' not in gasto:
@@ -71,7 +71,7 @@ def main():
     st.sidebar.title("Navegación")
     opcion = st.sidebar.radio(
         "Selecciona una opción:",
-        ["🏠 Inicio", "💵 Registrar Ventas", "💳 Registrar Gastos", "📊 Ver Balance", "⚙️ Configurar Tasa", "💰 Gestión de Pagos"]
+        ["🏠 Inicio", "💵 Registrar Ventas", "💳 Registrar Gastos", "📊 Ver Balance", "⚙️ Configurar Tasa", "💰 Gestión de Pagos", "📋 Gastos Pendientes"]
     )
     
     if opcion == "🏠 Inicio":
@@ -86,10 +86,12 @@ def main():
         configurar_tasa()
     elif opcion == "💰 Gestión de Pagos":
         gestion_pagos()
+    elif opcion == "📋 Gastos Pendientes":
+        ver_gastos_pendientes()
 
 def mostrar_inicio():
-    """Pantalla de inicio con resumen acumulativo"""
-    st.header("Resumen Acumulativo")
+    """Pantalla de inicio con resumen del día y acumulado"""
+    st.header("📊 Resumen General")
     
     # Obtener la tasa más reciente
     tasa_actual = obtener_tasa_actual()
@@ -97,12 +99,52 @@ def mostrar_inicio():
     if tasa_actual:
         st.success(f"💱 Tasa de cambio actual: {tasa_actual:,.2f} Bs/$")
     
+    # ===== RESUMEN DEL DÍA ACTUAL =====
+    st.subheader("📅 Resumen del Día de Hoy")
+    hoy = date.today().isoformat()
+    
+    ventas_hoy = [v for v in st.session_state.datos['ventas'] if v['fecha'] == hoy]
+    gastos_hoy = [g for g in st.session_state.datos['gastos'] if g['fecha'] == hoy]
+    gastos_pagados_hoy = [g for g in gastos_hoy if g.get('pagado', False)]
+    
+    total_ventas_hoy_bs = sum(v['total_bs'] for v in ventas_hoy)
+    total_ventas_hoy_usd = total_ventas_hoy_bs / tasa_actual if tasa_actual else 0
+    total_gastos_hoy_bs = sum(g['monto_bs'] for g in gastos_pagados_hoy)
+    total_gastos_hoy_usd = total_gastos_hoy_bs / tasa_actual if tasa_actual else 0
+    balance_hoy_bs = total_ventas_hoy_bs - total_gastos_hoy_bs
+    balance_hoy_usd = total_ventas_hoy_usd - total_gastos_hoy_usd
+    
+    col1, col2, col3, col4 = st.columns(4)
+    
+    with col1:
+        st.metric("💰 Ventas Hoy (Bs)", f"Bs. {total_ventas_hoy_bs:,.2f}")
+        st.metric("💰 Ventas Hoy ($)", f"$ {total_ventas_hoy_usd:,.2f}")
+    
+    with col2:
+        st.metric("💳 Gastos Hoy (Bs)", f"Bs. {total_gastos_hoy_bs:,.2f}")
+        st.metric("💳 Gastos Hoy ($)", f"$ {total_gastos_hoy_usd:,.2f}")
+    
+    with col3:
+        st.metric("⚖️ Balance Hoy (Bs)", f"Bs. {balance_hoy_bs:,.2f}")
+        st.metric("⚖️ Balance Hoy ($)", f"$ {balance_hoy_usd:,.2f}")
+    
+    with col4:
+        # Gastos pendientes de hoy
+        gastos_pendientes_hoy = [g for g in gastos_hoy if not g.get('pagado', False)]
+        total_gastos_pendientes_hoy_bs = sum(g['monto_bs'] for g in gastos_pendientes_hoy)
+        total_gastos_pendientes_hoy_usd = total_gastos_pendientes_hoy_bs / tasa_actual if tasa_actual else 0
+        st.metric("⏳ Gastos Pendientes Hoy (Bs)", f"Bs. {total_gastos_pendientes_hoy_bs:,.2f}")
+        st.metric("⏳ Gastos Pendientes Hoy ($)", f"$ {total_gastos_pendientes_hoy_usd:,.2f}")
+    
+    # ===== RESUMEN ACUMULADO =====
+    st.subheader("📈 Resumen Acumulado (Todos los tiempos)")
+    
     # Calcular totales acumulativos (todos los registros)
     total_ventas_bs = sum(v['total_bs'] for v in st.session_state.datos['ventas'])
     total_ventas_usd = sum(v['total_usd'] for v in st.session_state.datos['ventas'])
     
     # Solo gastos pagados afectan el balance
-    gastos_pagados = [g for g in st.session_state.datos['gastos'] if g.get('pagado', True)]
+    gastos_pagados = [g for g in st.session_state.datos['gastos'] if g.get('pagado', False)]
     total_gastos_pagados_bs = sum(g['monto_bs'] for g in gastos_pagados)
     total_gastos_pagados_usd = sum(g['monto_usd'] for g in gastos_pagados)
     
@@ -115,7 +157,7 @@ def mostrar_inicio():
     balance_actual_bs = total_ventas_bs - total_gastos_pagados_bs
     balance_actual_usd = total_ventas_usd - total_gastos_pagados_usd
     
-    # Mostrar métricas
+    # Mostrar métricas acumuladas
     col1, col2, col3, col4 = st.columns(4)
     
     with col1:
@@ -133,29 +175,6 @@ def mostrar_inicio():
     with col4:
         st.metric("⚖️ Balance Actual (Bs)", f"Bs. {balance_actual_bs:,.2f}")
         st.metric("⚖️ Balance Actual ($)", f"$ {balance_actual_usd:,.2f}")
-    
-    # Resumen del día actual
-    st.subheader("📅 Resumen del Día de Hoy")
-    hoy = date.today().isoformat()
-    
-    ventas_hoy = [v for v in st.session_state.datos['ventas'] if v['fecha'] == hoy]
-    gastos_hoy = [g for g in st.session_state.datos['gastos'] if g['fecha'] == hoy]
-    gastos_pagados_hoy = [g for g in gastos_hoy if g.get('pagado', True)]
-    
-    total_ventas_hoy_bs = sum(v['total_bs'] for v in ventas_hoy)
-    total_ventas_hoy_usd = sum(v['total_usd'] for v in ventas_hoy)
-    total_gastos_hoy_bs = sum(g['monto_bs'] for g in gastos_pagados_hoy)
-    total_gastos_hoy_usd = sum(g['monto_usd'] for g in gastos_pagados_hoy)
-    balance_hoy_bs = total_ventas_hoy_bs - total_gastos_hoy_bs
-    balance_hoy_usd = total_ventas_hoy_usd - total_gastos_hoy_usd
-    
-    col1, col2, col3 = st.columns(3)
-    with col1:
-        st.metric("Ventas Hoy (Bs)", f"Bs. {total_ventas_hoy_bs:,.2f}")
-    with col2:
-        st.metric("Gastos Hoy (Bs)", f"Bs. {total_gastos_hoy_bs:,.2f}")
-    with col3:
-        st.metric("Balance Hoy (Bs)", f"Bs. {balance_hoy_bs:,.2f}")
 
 def obtener_tasa_actual():
     """Obtener la tasa de cambio más reciente"""
@@ -284,8 +303,8 @@ def registrar_gastos():
             st.success(f"✅ Gasto registrado exitosamente! Monto: Bs. {monto_bs:,.2f} (${monto_usd:,.2f}) - Estado: {estado}")
 
 def ver_balance():
-    """Mostrar balance acumulativo completo"""
-    st.header("📊 Balance General Acumulativo")
+    """Mostrar balance con filtros por fecha"""
+    st.header("📊 Balance por Período")
     
     tasa_actual = obtener_tasa_actual()
     if tasa_actual:
@@ -308,8 +327,8 @@ def ver_balance():
     gastos_filtrados = [g for g in st.session_state.datos['gastos'] 
                        if fecha_inicio_str <= g['fecha'] <= fecha_fin_str]
     
-    # Separar gastos pagados y pendientes (usando get para compatibilidad)
-    gastos_pagados = [g for g in gastos_filtrados if g.get('pagado', True)]
+    # Separar gastos pagados y pendientes
+    gastos_pagados = [g for g in gastos_filtrados if g.get('pagado', False)]
     gastos_pendientes = [g for g in gastos_filtrados if not g.get('pagado', False)]
     
     # Métricas principales (solo gastos pagados afectan el balance)
@@ -324,6 +343,8 @@ def ver_balance():
     balance_usd = total_ventas_usd - total_gastos_pagados_usd
     
     # Mostrar métricas
+    st.subheader(f"📈 Balance del Período: {fecha_inicio} al {fecha_fin}")
+    
     col1, col2, col3, col4 = st.columns(4)
     
     with col1:
@@ -348,7 +369,6 @@ def ver_balance():
     with tab1:
         if ventas_filtradas:
             df_ventas = pd.DataFrame(ventas_filtradas)
-            # Formatear columnas para mejor visualización
             columnas_mostrar = ['fecha', 'punto_venta_bs', 'dolar_cash_bs', 'venta_externa_bs', 'bs_cash_bs', 'total_bs', 'total_usd']
             if 'descripcion' in df_ventas.columns:
                 columnas_mostrar.append('descripcion')
@@ -362,7 +382,6 @@ def ver_balance():
     with tab2:
         if gastos_pagados:
             df_gastos_pagados = pd.DataFrame(gastos_pagados)
-            # Seleccionar columnas disponibles
             columnas_disponibles = []
             for col in ['fecha', 'clasificacion', 'descripcion', 'monto_bs', 'monto_usd', 'fecha_pago']:
                 if col in df_gastos_pagados.columns:
@@ -377,7 +396,6 @@ def ver_balance():
     with tab3:
         if gastos_pendientes:
             df_gastos_pendientes = pd.DataFrame(gastos_pendientes)
-            # Seleccionar columnas disponibles
             columnas_disponibles = []
             for col in ['fecha', 'clasificacion', 'descripcion', 'monto_bs', 'monto_usd']:
                 if col in df_gastos_pendientes.columns:
@@ -405,8 +423,8 @@ def ver_balance():
                     pagados = gastos_clasif['pagado'].sum()
                     pendientes = len(gastos_clasif) - pagados
                 else:
-                    pagados = len(gastos_clasif)
-                    pendientes = 0
+                    pagados = 0
+                    pendientes = len(gastos_clasif)
                 
                 resumen_data.append({
                     'clasificacion': clasificacion,
@@ -464,7 +482,7 @@ def gestion_pagos():
     """Gestión de pagos de gastos pendientes"""
     st.header("💰 Gestión de Pagos")
     
-    # Obtener gastos pendientes (usando get para compatibilidad)
+    # Obtener gastos pendientes
     gastos_pendientes = [g for g in st.session_state.datos['gastos'] if not g.get('pagado', False)]
     
     if not gastos_pendientes:
@@ -528,6 +546,70 @@ def gestion_pagos():
         st.dataframe(df_pagos_recientes, use_container_width=True)
     else:
         st.info("No hay pagos recientes en los últimos 7 días")
+
+def ver_gastos_pendientes():
+    """Vista especializada para ver todos los gastos pendientes"""
+    st.header("📋 Gastos Pendientes a la Fecha")
+    
+    # Obtener todos los gastos pendientes
+    gastos_pendientes = [g for g in st.session_state.datos['gastos'] if not g.get('pagado', False)]
+    
+    if not gastos_pendientes:
+        st.success("🎉 No hay gastos pendientes de pago")
+        return
+    
+    # Mostrar resumen
+    total_pendiente_bs = sum(g['monto_bs'] for g in gastos_pendientes)
+    total_pendiente_usd = sum(g['monto_usd'] for g in gastos_pendientes)
+    
+    col1, col2 = st.columns(2)
+    with col1:
+        st.metric("💰 Total Pendiente (Bs)", f"Bs. {total_pendiente_bs:,.2f}")
+    with col2:
+        st.metric("💰 Total Pendiente ($)", f"$ {total_pendiente_usd:,.2f}")
+    
+    # Agrupar por clasificación
+    st.subheader("📊 Gastos Pendientes por Clasificación")
+    
+    gastos_por_clasificacion = {}
+    for gasto in gastos_pendientes:
+        clasificacion = gasto['clasificacion']
+        if clasificacion not in gastos_por_clasificacion:
+            gastos_por_clasificacion[clasificacion] = []
+        gastos_por_clasificacion[clasificacion].append(gasto)
+    
+    for clasificacion, gastos in gastos_por_clasificacion.items():
+        total_clasificacion_bs = sum(g['monto_bs'] for g in gastos)
+        total_clasificacion_usd = sum(g['monto_usd'] for g in gastos)
+        
+        with st.expander(f"{clasificacion} - Bs. {total_clasificacion_bs:,.2f} (${total_clasificacion_usd:,.2f}) - {len(gastos)} gastos"):
+            for gasto in gastos:
+                col1, col2, col3 = st.columns([3, 2, 1])
+                with col1:
+                    st.write(f"**{gasto['descripcion']}**")
+                    st.write(f"Fecha: {gasto['fecha']}")
+                with col2:
+                    st.write(f"Bs. {gasto['monto_bs']:,.2f}")
+                    st.write(f"$ {gasto['monto_usd']:,.2f}")
+                with col3:
+                    if st.button("✅ Pagar", key=f"pagar_directo_{gasto.get('id', hash(gasto['descripcion']))}"):
+                        # Actualizar el gasto como pagado
+                        for g in st.session_state.datos['gastos']:
+                            if g.get('id') == gasto.get('id') or (g['fecha'] == gasto['fecha'] and g['descripcion'] == gasto['descripcion']):
+                                g['pagado'] = True
+                                g['fecha_pago'] = date.today().isoformat()
+                                break
+                        guardar_datos(st.session_state.datos)
+                        st.success("✅ Gasto marcado como pagado")
+                        st.rerun()
+    
+    # Tabla completa de gastos pendientes
+    st.subheader("📋 Lista Completa de Gastos Pendientes")
+    if gastos_pendientes:
+        df_pendientes = pd.DataFrame(gastos_pendientes)
+        columnas_mostrar = ['fecha', 'clasificacion', 'descripcion', 'monto_bs', 'monto_usd']
+        df_display = df_pendientes[columnas_mostrar]
+        st.dataframe(df_display, use_container_width=True)
 
 if __name__ == "__main__":
     main()
