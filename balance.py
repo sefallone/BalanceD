@@ -19,7 +19,14 @@ def cargar_datos():
     """Cargar datos desde el archivo JSON"""
     if os.path.exists(DATA_FILE):
         with open(DATA_FILE, 'r', encoding='utf-8') as f:
-            return json.load(f)
+            datos = json.load(f)
+            # Asegurar que todos los gastos tengan el campo 'pagado'
+            for gasto in datos.get('gastos', []):
+                if 'pagado' not in gasto:
+                    gasto['pagado'] = True  # Por defecto, gastos antiguos se consideran pagados
+                if 'fecha_pago' not in gasto and gasto['pagado']:
+                    gasto['fecha_pago'] = gasto['fecha']  # Usar la fecha del gasto como fecha de pago
+            return datos
     return {
         "ventas": [],
         "gastos": [],
@@ -86,12 +93,12 @@ def mostrar_inicio():
     total_ventas_usd = sum(v['total_usd'] for v in st.session_state.datos['ventas'])
     
     # Solo gastos pagados afectan el balance
-    gastos_pagados = [g for g in st.session_state.datos['gastos'] if g['pagado']]
+    gastos_pagados = [g for g in st.session_state.datos['gastos'] if g.get('pagado', True)]
     total_gastos_pagados_bs = sum(g['monto_bs'] for g in gastos_pagados)
     total_gastos_pagados_usd = sum(g['monto_usd'] for g in gastos_pagados)
     
     # Gastos pendientes
-    gastos_pendientes = [g for g in st.session_state.datos['gastos'] if not g['pagado']]
+    gastos_pendientes = [g for g in st.session_state.datos['gastos'] if not g.get('pagado', False)]
     total_gastos_pendientes_bs = sum(g['monto_bs'] for g in gastos_pendientes)
     total_gastos_pendientes_usd = sum(g['monto_usd'] for g in gastos_pendientes)
     
@@ -124,7 +131,7 @@ def mostrar_inicio():
     
     ventas_hoy = [v for v in st.session_state.datos['ventas'] if v['fecha'] == hoy]
     gastos_hoy = [g for g in st.session_state.datos['gastos'] if g['fecha'] == hoy]
-    gastos_pagados_hoy = [g for g in gastos_hoy if g['pagado']]
+    gastos_pagados_hoy = [g for g in gastos_hoy if g.get('pagado', True)]
     
     total_ventas_hoy_bs = sum(v['total_bs'] for v in ventas_hoy)
     total_ventas_hoy_usd = sum(v['total_usd'] for v in ventas_hoy)
@@ -247,6 +254,7 @@ def registrar_gastos():
                 return
                 
             monto_usd = monto_bs / tasa_actual
+            fecha_pago = fecha.isoformat() if pagado else None
             
             nuevo_gasto = {
                 'fecha': fecha.isoformat(),
@@ -256,8 +264,8 @@ def registrar_gastos():
                 'monto_usd': monto_usd,
                 'tasa_cambio': tasa_actual,
                 'pagado': pagado,
-                'id': len(st.session_state.datos['gastos']) + 1,
-                'fecha_pago': fecha.isoformat() if pagado else None
+                'fecha_pago': fecha_pago,
+                'id': len(st.session_state.datos['gastos']) + 1
             }
             
             st.session_state.datos['gastos'].append(nuevo_gasto)
@@ -291,9 +299,9 @@ def ver_balance():
     gastos_filtrados = [g for g in st.session_state.datos['gastos'] 
                        if fecha_inicio_str <= g['fecha'] <= fecha_fin_str]
     
-    # Separar gastos pagados y pendientes
-    gastos_pagados = [g for g in gastos_filtrados if g['pagado']]
-    gastos_pendientes = [g for g in gastos_filtrados if not g['pagado']]
+    # Separar gastos pagados y pendientes (usando get para compatibilidad)
+    gastos_pagados = [g for g in gastos_filtrados if g.get('pagado', True)]
+    gastos_pendientes = [g for g in gastos_filtrados if not g.get('pagado', False)]
     
     # Métricas principales (solo gastos pagados afectan el balance)
     total_ventas_bs = sum(v['total_bs'] for v in ventas_filtradas)
@@ -332,7 +340,11 @@ def ver_balance():
         if ventas_filtradas:
             df_ventas = pd.DataFrame(ventas_filtradas)
             # Formatear columnas para mejor visualización
-            df_ventas_display = df_ventas[['fecha', 'punto_venta_bs', 'dolar_cash_bs', 'venta_externa_bs', 'bs_cash_bs', 'total_bs', 'total_usd', 'descripcion']]
+            columnas_mostrar = ['fecha', 'punto_venta_bs', 'dolar_cash_bs', 'venta_externa_bs', 'bs_cash_bs', 'total_bs', 'total_usd']
+            if 'descripcion' in df_ventas.columns:
+                columnas_mostrar.append('descripcion')
+            
+            df_ventas_display = df_ventas[columnas_mostrar]
             st.subheader("Detalle de Ventas")
             st.dataframe(df_ventas_display, use_container_width=True)
         else:
@@ -341,7 +353,13 @@ def ver_balance():
     with tab2:
         if gastos_pagados:
             df_gastos_pagados = pd.DataFrame(gastos_pagados)
-            df_gastos_pagados_display = df_gastos_pagados[['fecha', 'clasificacion', 'descripcion', 'monto_bs', 'monto_usd', 'fecha_pago']]
+            # Seleccionar columnas disponibles
+            columnas_disponibles = []
+            for col in ['fecha', 'clasificacion', 'descripcion', 'monto_bs', 'monto_usd', 'fecha_pago']:
+                if col in df_gastos_pagados.columns:
+                    columnas_disponibles.append(col)
+            
+            df_gastos_pagados_display = df_gastos_pagados[columnas_disponibles]
             st.subheader("Gastos Pagados")
             st.dataframe(df_gastos_pagados_display, use_container_width=True)
         else:
@@ -350,7 +368,13 @@ def ver_balance():
     with tab3:
         if gastos_pendientes:
             df_gastos_pendientes = pd.DataFrame(gastos_pendientes)
-            df_gastos_pendientes_display = df_gastos_pendientes[['fecha', 'clasificacion', 'descripcion', 'monto_bs', 'monto_usd']]
+            # Seleccionar columnas disponibles
+            columnas_disponibles = []
+            for col in ['fecha', 'clasificacion', 'descripcion', 'monto_bs', 'monto_usd']:
+                if col in df_gastos_pendientes.columns:
+                    columnas_disponibles.append(col)
+            
+            df_gastos_pendientes_display = df_gastos_pendientes[columnas_disponibles]
             st.subheader("Gastos Pendientes de Pago")
             st.dataframe(df_gastos_pendientes_display, use_container_width=True)
         else:
@@ -359,13 +383,25 @@ def ver_balance():
     with tab4:
         if gastos_filtrados:
             df_gastos_clasif = pd.DataFrame(gastos_filtrados)
-            resumen_clasif = df_gastos_clasif.groupby('clasificacion').agg({
-                'monto_bs': 'sum',
-                'monto_usd': 'sum',
-                'pagado': lambda x: (x == True).sum()
-            }).reset_index()
-            resumen_clasif['pendiente'] = resumen_clasif.groupby('clasificacion')['pagado'].transform(lambda x: (x == False).sum())
             
+            # Calcular resumen por clasificación
+            resumen_data = []
+            for clasificacion in df_gastos_clasif['clasificacion'].unique():
+                gastos_clasif = df_gastos_clasif[df_gastos_clasif['clasificacion'] == clasificacion]
+                total_bs = gastos_clasif['monto_bs'].sum()
+                total_usd = gastos_clasif['monto_usd'].sum()
+                pagados = gastos_clasif['pagado'].sum() if 'pagado' in gastos_clasif.columns else len(gastos_clasif)
+                pendientes = len(gastos_clasif) - pagados
+                
+                resumen_data.append({
+                    'clasificacion': clasificacion,
+                    'monto_bs': total_bs,
+                    'monto_usd': total_usd,
+                    'pagados': pagados,
+                    'pendientes': pendientes
+                })
+            
+            resumen_clasif = pd.DataFrame(resumen_data)
             st.subheader("Gastos por Clasificación")
             st.dataframe(resumen_clasif, use_container_width=True)
         else:
@@ -413,8 +449,8 @@ def gestion_pagos():
     """Gestión de pagos de gastos pendientes"""
     st.header("💰 Gestión de Pagos")
     
-    # Obtener gastos pendientes
-    gastos_pendientes = [g for g in st.session_state.datos['gastos'] if not g['pagado']]
+    # Obtener gastos pendientes (usando get para compatibilidad)
+    gastos_pendientes = [g for g in st.session_state.datos['gastos'] if not g.get('pagado', False)]
     
     if not gastos_pendientes:
         st.success("🎉 No hay gastos pendientes de pago")
@@ -449,11 +485,23 @@ def gestion_pagos():
     
     fecha_limite = (datetime.date.today() - datetime.timedelta(days=7)).isoformat()
     pagos_recientes = [g for g in st.session_state.datos['gastos'] 
-                      if g['pagado'] and g['fecha_pago'] >= fecha_limite]
+                      if g.get('pagado', False) and g.get('fecha_pago', '') >= fecha_limite]
     
     if pagos_recientes:
-        df_pagos_recientes = pd.DataFrame(pagos_recientes)
-        df_pagos_recientes = df_pagos_recientes[['fecha', 'fecha_pago', 'clasificacion', 'descripcion', 'monto_bs', 'monto_usd']]
+        # Crear DataFrame con columnas disponibles
+        datos_pagos = []
+        for pago in pagos_recientes:
+            dato_pago = {
+                'fecha': pago['fecha'],
+                'fecha_pago': pago.get('fecha_pago', pago['fecha']),
+                'clasificacion': pago['clasificacion'],
+                'descripcion': pago['descripcion'],
+                'monto_bs': pago['monto_bs'],
+                'monto_usd': pago['monto_usd']
+            }
+            datos_pagos.append(dato_pago)
+        
+        df_pagos_recientes = pd.DataFrame(datos_pagos)
         st.dataframe(df_pagos_recientes, use_container_width=True)
     else:
         st.info("No hay pagos recientes en los últimos 7 días")
