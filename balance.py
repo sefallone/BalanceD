@@ -447,7 +447,7 @@ def gestion_pagos():
     # Mostrar resumen de pagos recientes
     st.subheader("📋 Pagos Recientes (Últimos 7 días)")
     
- fecha_limite = (datetime.date.today() - datetime.timedelta(days=7)).isoformat()
+    fecha_limite = (datetime.date.today() - datetime.timedelta(days=7)).isoformat()
     pagos_recientes = [g for g in st.session_state.datos['gastos'] 
                       if g['pagado'] and g['fecha_pago'] >= fecha_limite]
     
